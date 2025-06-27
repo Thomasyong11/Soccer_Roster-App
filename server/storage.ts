@@ -80,7 +80,7 @@ export class DatabaseStorage implements IStorage {
 
   async deletePlayer(id: number): Promise<boolean> {
     const result = await db.delete(players).where(eq(players.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async toggleCheckIn(id: number): Promise<Player | undefined> {
@@ -116,33 +116,106 @@ export class DatabaseStorage implements IStorage {
     
     try {
       const positionHistory = JSON.parse(player.positionHistory || "[]");
-      const playtimeHistory = JSON.parse(player.playtimeHistory || "[]");
       
-      // Count position frequency
-      const positionCounts = positionHistory.reduce((acc: any, pos: string) => {
-        acc[pos] = (acc[pos] || 0) + 1;
-        return acc;
-      }, {});
-      
-      // Get most played position
-      const mostPlayedPosition = Object.keys(positionCounts).reduce((a, b) => 
-        positionCounts[a] > positionCounts[b] ? a : b, player.position);
-      
-      // Consider recent playtime and performance
-      if (playtimeHistory.length > 0) {
-        const recentPerformance = playtimeHistory.slice(-3);
-        const avgPerformance = recentPerformance.reduce((sum: number, p: any) => sum + (p.rating || 0), 0) / recentPerformance.length;
-        
-        // If performance is good in current position, stick with it
-        if (avgPerformance > 7) {
-          return player.position;
-        }
+      // Priority 1: Performance-based suggestions (highest priority)
+      if (player.goals >= 3) {
+        return "forward"; // High goal scorer
       }
       
-      return mostPlayedPosition;
+      if (player.assists >= 3) {
+        return "midfielder"; // Good playmaker
+      }
+      
+      // Priority 2: Experience-based suggestions
+      if (player.matchesPlayed > 5) {
+        const goalsPerMatch = player.goals / player.matchesPlayed;
+        const assistsPerMatch = player.assists / player.matchesPlayed;
+        
+        if (goalsPerMatch > 0.5) return "forward";
+        if (assistsPerMatch > 0.3) return "midfielder";
+        if (player.redCards + player.yellowCards === 0) return "defender"; // Clean record
+      }
+      
+      // Priority 3: Team composition needs (lower priority)
+      const allPlayers = await this.getAllPlayers();
+      const positionNeeds = this.analyzeTeamPositionNeeds(allPlayers);
+      const mostNeededPosition = Object.entries(positionNeeds)
+        .sort(([,a], [,b]) => b - a)[0]?.[0];
+      
+      if (mostNeededPosition && positionNeeds[mostNeededPosition] > 1) {
+        return mostNeededPosition;
+      }
+      
+      // Count position frequency from history
+      if (positionHistory.length > 1) {
+        const positionCounts = positionHistory.reduce((acc: any, pos: string) => {
+          acc[pos] = (acc[pos] || 0) + 1;
+          return acc;
+        }, {});
+        
+        // Get most experienced position
+        const mostPlayedPosition = Object.keys(positionCounts).reduce((a, b) => 
+          positionCounts[a] > positionCounts[b] ? a : b, player.position);
+        
+        return mostPlayedPosition;
+      }
+      
+      // Default intelligent suggestion based on player attributes
+      if (player.matchesPlayed > 5) {
+        // Experienced player - suggest based on current stats
+        const goalsPerMatch = player.goals / player.matchesPlayed;
+        const assistsPerMatch = player.assists / player.matchesPlayed;
+        
+        if (goalsPerMatch > 0.5) return "forward";
+        if (assistsPerMatch > 0.3) return "midfielder";
+        if (player.redCards + player.yellowCards === 0) return "defender"; // Clean record
+      }
+      
+      return player.position; // Keep current position as fallback
     } catch (error) {
+      console.error('Error in smart position suggestion:', error);
       return player.position;
     }
+  }
+
+  private calculatePlayerPerformance(player: Player): number {
+    if (player.matchesPlayed === 0) return 0;
+    
+    const goalsWeight = 3;
+    const assistsWeight = 2;
+    const disciplineWeight = -1;
+    
+    const goalsScore = (player.goals / player.matchesPlayed) * goalsWeight;
+    const assistsScore = (player.assists / player.matchesPlayed) * assistsWeight;
+    const disciplineScore = (player.redCards * 2 + player.yellowCards) * disciplineWeight;
+    
+    return Math.max(0, goalsScore + assistsScore + disciplineScore);
+  }
+
+  private analyzeTeamPositionNeeds(players: Player[]): Record<string, number> {
+    const positionCounts = players.reduce((acc, player) => {
+      acc[player.position] = (acc[player.position] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    
+    // Ideal formation ratios (4-4-2 as baseline)
+    const idealRatios = {
+      goalkeeper: 0.1,
+      defender: 0.4,
+      midfielder: 0.4,
+      forward: 0.2
+    };
+    
+    const totalPlayers = players.length;
+    const needs: Record<string, number> = {};
+    
+    Object.entries(idealRatios).forEach(([position, ratio]) => {
+      const ideal = Math.ceil(totalPlayers * ratio);
+      const current = positionCounts[position] || 0;
+      needs[position] = Math.max(0, ideal - current);
+    });
+    
+    return needs;
   }
 
   async updateWeeklyStats(): Promise<void> {
@@ -190,7 +263,7 @@ export class DatabaseStorage implements IStorage {
       .set({ isActive: false })
       .where(eq(matchReminders.id, id));
     
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getPlayerSuggestions(query: string): Promise<string[]> {

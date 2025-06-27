@@ -223,29 +223,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Match reminders
   app.post("/api/reminders", async (req, res) => {
     try {
-      const validatedData = insertMatchReminderSchema.parse(req.body);
-      const reminder = await storage.createMatchReminder(validatedData);
+      // Manual validation to handle date conversion properly
+      const { playerId, matchTime, isActive = true } = req.body;
+      
+      if (!matchTime || isNaN(Date.parse(matchTime))) {
+        return res.status(400).json({ 
+          message: "Validation error", 
+          errors: [{ path: ["matchTime"], message: "Valid match time is required" }]
+        });
+      }
+
+      const reminderData = {
+        playerId: playerId || null,
+        matchTime: new Date(matchTime),
+        isActive
+      };
+
+      const reminder = await storage.createMatchReminder(reminderData);
       
       // Set up timer for 5 minutes before match
       const now = new Date();
-      const matchTime = new Date(validatedData.matchTime);
-      const reminderTime = new Date(matchTime.getTime() - 5 * 60 * 1000); // 5 minutes before
+      const matchTimeDate = new Date(matchTime);
+      const reminderTime = new Date(matchTimeDate.getTime() - 5 * 60 * 1000); // 5 minutes before
       
       if (reminderTime > now) {
         setTimeout(async () => {
           // In a real app, this would send a notification
-          console.log(`Reminder: Match starting in 5 minutes for player ${validatedData.playerId}`);
+          console.log(`Reminder: Match starting in 5 minutes for player ${playerId}`);
         }, reminderTime.getTime() - now.getTime());
       }
 
       res.status(201).json(reminder);
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: error.errors 
-        });
-      }
+      console.error('Error creating reminder:', error);
       res.status(500).json({ message: "Failed to create reminder" });
     }
   });

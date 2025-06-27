@@ -58,9 +58,12 @@ export const insertPlayerSchema = createInsertSchema(players).omit({
   matchesPlayed: z.number().min(0).default(0),
 });
 
-export const insertMatchReminderSchema = createInsertSchema(matchReminders).omit({
-  id: true,
-  createdAt: true,
+export const insertMatchReminderSchema = z.object({
+  playerId: z.number().optional(),
+  matchTime: z.string().refine((str) => !isNaN(Date.parse(str)), {
+    message: "Invalid date format"
+  }).transform((str) => new Date(str)),
+  isActive: z.boolean().default(true),
 });
 
 export const insertPlayerSuggestionSchema = createInsertSchema(playerSuggestions).omit({

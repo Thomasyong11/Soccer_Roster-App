@@ -70,7 +70,7 @@ const WeeklyPerformanceCard = ({ player }: { player: Player }) => {
     summary: string;
     improvement: { goals: number; assists: number; matches: number };
   }>({
-    queryKey: ["/api/players", player.id, "weekly-summary"],
+    queryKey: [`/api/players/${player.id}/weekly-summary`],
   });
 
   return (
@@ -103,7 +103,7 @@ const WeeklyPerformanceCard = ({ player }: { player: Player }) => {
 // Helper component for smart position suggestions
 const SmartPositionCard = ({ player }: { player: Player }) => {
   const { data: suggestion } = useQuery<{ suggestedPosition: string }>({
-    queryKey: ["/api/players", player.id, "smart-position"],
+    queryKey: [`/api/players/${player.id}/smart-position`],
   });
 
   return (
